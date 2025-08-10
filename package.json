@@ -1,0 +1,18 @@
+{
+  "name": "gmb-post-scheduler",
+  "version": "1.0.0",
+  "description": "",
+    "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-lambda": "^3.787.0",
+    "axios": "^1.8.4",
+    "google-auth-library": "^9.15.1"
+  }
+}
