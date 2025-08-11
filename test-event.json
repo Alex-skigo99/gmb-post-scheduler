@@ -1,0 +1,16 @@
+{
+  "version": "0",
+  "id": "test-event-id",
+  "detail-type": "Scheduled Post",
+  "source": "gmb.post.scheduler",
+  "account": "054037140239",
+  "time": "2025-08-10T19:45:00Z",
+  "region": "us-east-2",
+  "detail": {
+    "accountId": "your-google-account-id",
+    "gmb_id": "your-gmb-location-id",
+    "organizationId": "your-organization-id",
+    "post_id": "your-post-id",
+    "user_id": "your-user-id"
+  }
+}
