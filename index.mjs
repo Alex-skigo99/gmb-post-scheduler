@@ -78,30 +78,25 @@ export const handler = async (event) => {
         // Step 4: POST LocalPostCreateInstance to Google API
         console.log(`Posting LocalPostCreateInstance to Google API for post ${post_id}`);
         const uploadedPost = await Utils.createLocalPost(accountId, gmb_id, localPostInstance, googleAccessToken);
-
+        const newPostId = uploadedPost.name.split("/").pop();
+        
         console.log(`✅ Post created successfully:`, uploadedPost.name);
 
         // Step 5: Update database in transaction
         await knex.transaction(async (trx) => {
-            await Utils.updatePostInDatabase(trx, gmb_id, post_id, uploadedPost);
-
             // Delete previous media from GMB_MEDIA_TABLE and S3
             await Utils.cleanupOldMedia(trx, gmb_id, post_id, mediaData);
+            
+            await Utils.updatePostInDatabase(trx, gmb_id, post_id, uploadedPost);
 
             // Save new media from uploadedPost
             if (uploadedPost.media && uploadedPost.media.length > 0) {
-                await Utils.saveNewMedia(trx, gmb_id, post_id, uploadedPost.media);
+                await Utils.saveNewMedia(trx, gmb_id, newPostId, uploadedPost.media);
             }
         });
-        console.log(`✅ Database updated successfully for post ${post_id}`);
+        console.log('✅ Database updated successfully.');
 
-        // Step 6: Send email notification to user
-        console.log(`Sending email notification for post ${post_id} to user ${user_id}`);
-        if (user_id) {
-            await Utils.sendEmailNotification(user_id, postData);
-        }
-
-        console.log(`🎉 Successfully processed scheduled post: ${post_id}`);
+        console.log(`🎉 Successfully processed scheduled post: ${post_id}. New id: ${newPostId}`);
         
         return {
             statusCode: 200,

@@ -1,12 +1,13 @@
-import LayerConstants from "/opt/nodejs/Constants.js";
 import knex from "/opt/nodejs/db.js";
-import SnsUtils from "/opt/nodejs/SnsUtils.js";
 import DatabaseTableConstants from "/opt/nodejs/DatabaseTableConstants.js";
 import { S3Client, GetObjectCommand, DeleteObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import axios from "axios";
 
 const s3Client = new S3Client({ region: "us-east-2" });
+
+const GMB_MEDIA_BUCKET = "renew-local-gmb-location-media";
+const PRE_SIGNED_URL_EXPIRY_TIME = 3600;
 
 class Utils {
     static getLocalPostCreateUrl(accountId, locationId) {
@@ -48,16 +49,18 @@ class Utils {
         } = postData;
 
         const localPostInstance = {
-            postType: topicType,
+            topicType,
             languageCode: languageCode || "en-US",
             summary: summary || "",
         };
 
-        if (topicType !== "OFFER" && callToAction_type !== undefined) {
+        if (topicType !== "OFFER" && callToAction_type) {
             localPostInstance.callToAction = {
                 type: callToAction_type,
-                url: callToAction_url || "",
             };
+            if (callToAction_type !== "CALL" && callToAction_url) {
+                localPostInstance.callToAction.url = callToAction_url;
+            }
         }
 
         if (topicType === "EVENT" || topicType === "OFFER") {
@@ -68,7 +71,7 @@ class Utils {
         }
 
         if (topicType === "ALERT") {
-            localPostInstance.alertType = alertType;
+            localPostInstance.alertType = alertType || "COVID_19";
         }
 
         if (topicType === "OFFER") {
@@ -85,11 +88,10 @@ class Utils {
             const mediaWithUrls = await Promise.all(
                 mediaData.map(async (media) => {
                     const key = `${gmb_id}/${media.id}`;
-                    const signedUrl = await Utils.getSignedUrlForS3Object(key);
+                    const signedUrl = await Utils.getSignedUrlForS3Object(key, GMB_MEDIA_BUCKET);
                     return {
                         sourceUrl: signedUrl,
-                        contentType: media.contentType,
-                        description: media.description || "",
+                        mediaFormat: "PHOTO",
                     };
                 })
             );
@@ -118,13 +120,13 @@ class Utils {
         return postRes.data;
     }
 
-    static async getSignedUrlForS3Object(key, bucketName = LayerConstants.GMB_MEDIA_BUCKET) {
+    static async getSignedUrlForS3Object(key, bucketName = GMB_MEDIA_BUCKET) {
         try {
             const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
             const signedUrl = await getSignedUrl(
                 s3Client,
                 command,
-                { expiresIn: LayerConstants.PRE_SIGNED_URL_EXPIRY_TIME || 3600 }
+                { expiresIn: PRE_SIGNED_URL_EXPIRY_TIME || 3600 }
             );
             return signedUrl;
         } catch (error) {
@@ -135,11 +137,11 @@ class Utils {
     static async updatePostInDatabase(trx, gmb_id, post_id, post) {
         try {
             await trx(DatabaseTableConstants.GMB_POST_TABLE)
-                .where({ id: post_id, gmbId: gmb_id })
+                .where({ id: post_id, gmb_id })
                 .update({
                     id: post.name.split("/").pop(),
-                    languageCode: post.languageCode ?? null,
-                    summary: post.summary ?? null,
+                    languageCode: post.languageCode ?? "en-US",
+                    summary: post.summary ?? "Empty post",
                     callToAction_url: post.callToAction?.url ?? null,
                     callToAction_type: post.callToAction?.actionType ?? null,
                     createTime: post.createTime ?? null,
@@ -153,7 +155,7 @@ class Utils {
                     offer_couponCode: post.offer?.couponCode ?? null,
                     offer_redeemOnlineUrl: post.offer?.redeemOnlineUrl ?? null,
                     offer_termsConditions: post.offer?.termsConditions ?? null,
-                    scheduled_pub_time: null,
+                    scheduled_publish_time: null,
                 });
         } catch (error) {
             throw new Error(`Failed to update post in database: ${error.message}`);
@@ -221,7 +223,7 @@ class Utils {
         }
     }
 
-    static async uploadMediaToS3(key, content, contentType, bucketName = LayerConstants.GMB_MEDIA_BUCKET) {
+    static async uploadMediaToS3(key, content, contentType, bucketName = GMB_MEDIA_BUCKET) {
         try {
             const putObjectCommand = new PutObjectCommand({
                 Bucket: bucketName,
@@ -236,7 +238,7 @@ class Utils {
         }
     }
 
-    static async removeDocumentsFromS3(uploadedFiles, bucketName = LayerConstants.GMB_MEDIA_BUCKET) {
+    static async removeDocumentsFromS3(uploadedFiles, bucketName = GMB_MEDIA_BUCKET) {
         if (!uploadedFiles || !Array.isArray(uploadedFiles) || uploadedFiles.length === 0) {
             return;
         }
@@ -254,31 +256,6 @@ class Utils {
             await Promise.all(deletePromises);
         } catch (error) {
             throw new Error(`Failed to remove documents from S3: ${error.message}`);
-        }
-    }
-
-    static async sendEmailNotification(user_id, postData) {
-        try {
-            const userData = await knex('USER_TABLE')
-                .where({ id: user_id })
-                .first();
-
-            if (!userData) {
-                console.warn(`User not found: ${user_id}`);
-                throw new Error(`User not found: ${user_id}`);
-            }
-
-            const message = {
-                email: userData.email,
-                subject: "GMB Post Published Successfully",
-                message: `Hello ${userData.name},\n\nYour scheduled Google My Business post has been published successfully.\n\nPost Summary: ${postData.summary}\nPost Type: ${postData.topicType}\nPublished At: ${new Date().toISOString()}\n\nBest regards,\nGMB Post Scheduler`
-            };
-
-            await SnsUtils.sendEmailNotificationSns(message);
-
-            console.log(`📧 Email notification sent to: ${userData.email}`);
-        } catch (error) {
-            console.error(`Failed to send email notification:`, error);
         }
     }
 }
